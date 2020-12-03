@@ -13,11 +13,13 @@ from orderedset import OrderedSet
 import scipy
 from scipy import *
 
-
+# # load glove vector
 glove_word_vectors = api.load("glove-wiki-gigaword-100")
+
+# en_core_web_sm：英语多任务CNN，在OntoNotes上训练，大11 MB
 spacynlp=spacy.load("en_core_web_sm")
 
-# Step 1: Deverbal Noun Reference
+# Sentence Graph Construction Step 1: Deverbal Noun Reference
 # step 1.1: get nouns for verbs in the current sentence
 verbs_to_escape = ["be", "is","am","are","was", "were", "being","been","do","did",
                "done","have","had","get","got","gotten"]
@@ -51,6 +53,7 @@ class SentenceGraph:
         self.ita = ita
 
     def get_nouns_for_verbs(self, string):
+        # 创建spacynlp对象
         doc = spacynlp(string)
         nouns_list = []
         if len(doc)>0:
@@ -61,10 +64,14 @@ class SentenceGraph:
                     noun_forms = self._nounify(token.text)
                     nouns_list.extend(noun_forms)
         return nouns_list
-
+    # get noun forms for each lemma
     def _nounify(self, verb):
         # get the lemmas of base verbs;
-        base = wn.morphy(verb, wn.VERB)
+        base = wn.morphy(verb, wn.VERB)  # 恢复动词原型
+        '''
+            print(wn.morphy(‘denied’, wn.VERB))
+                           deny
+        '''
         if base:
             lemmas = wn.lemmas(base, pos="v")
             noun_forms = []
@@ -85,17 +92,22 @@ class SentenceGraph:
         nouns_list=list(set(nouns_list))
         for noun in nouns_list:
             try:
+                # model.most_similar("cat")  # show words that similar to word 'cat'
+                # nn = glove_word_vectors.most_similar(positive=['eater'])
                 nn = word_vectors.most_similar(positive=[noun])
+                # return [('eaters', 0.7994951605796814), ('smoker', 0.5142498016357422), ('drinker', 0.5066465735435486)....]
+
                 # keep nn whose have high similary score
                 nn = [ tuple_[0] for tuple_ in nn if tuple_[1] > threshold]
                 similar_nouns_list.extend(nn)
             # pass on uncommon words
             except KeyError:
                 pass
-        similar_nouns_list.extend(nouns_list)
+        similar_nouns_list.extend(nouns_list)   # 找到相似的词，放在一起
         return list(set(similar_nouns_list))
 
     # check if deverbal noun reference exits in the subsequent sentence
+                                                    # subsequent（连串）  sentence(后句)
     def check_noun_reference(self, similar_nouns_list, subsequent_sen):
         flag=False
         doc = spacynlp(subsequent_sen)
@@ -108,7 +120,7 @@ class SentenceGraph:
         return flag
 
     # step 2: Event/Entity Continuation
-    # Str needs to be raw, i.e., use str before normalisation and stemming
+    # Str needs to be raw(raw指的是未处理的), i.e., use str before normalisation and stemming
     def compare_name_entity(self, str1, str2):
         flag = False
         doc1 = spacynlp(str1)
@@ -121,7 +133,7 @@ class SentenceGraph:
                     flag=True
                     break
         return flag
-
+    # 检查话语结构标记
     def check_discourse_markers(self, str1,str2):
         flag = False
         doc2 = spacynlp(str2)
@@ -141,6 +153,7 @@ class SentenceGraph:
         target.extend(source)
         weight.extend(weight)
         triplet_list=[ (source[i],target[i],weight[i]) for i in range(len(source))]
+        # x = triplet_list[i]=(s, t, w)  传入x返回(x[0],x[1])
         sorted_by_src = sorted(triplet_list, key=lambda x: (x[0],x[1]))
 
         sorted_source = []
@@ -160,7 +173,8 @@ class SentenceGraph:
             v = self.get_lm_embedding(string)
         return v
 
-    # get sentence embeddings with w2v
+    # get sentence embeddings with w2v   sum for each word vector of sentence
+    # 句子中的单词的向量和
     def get_wv_embedding(self, string):
         word_embeddings = self.w2v
         sent = string.lower()
@@ -187,6 +201,9 @@ class SentenceGraph:
         v = v + eps
         return v
 
+    # compute the cos similarity between a and b. a, b are numpy arrays
+    def cos_sim(self, a, b):
+        return 1 - scipy.spatial.distance.cosine(a, b)
     # step 4: compare sentence similarity
     def check_if_similar_sentences(self,sentence_emb1,sentence_emb2):
         flag = False
@@ -208,6 +225,7 @@ class SentenceGraph:
  
         for i in range(self.length):
              emb_sen = self.get_sentence_embeddings(self.sentences_list[i])
+             # 修改矩阵中每一行的值
              emb_sentence_vectors[i,] = emb_sen
         
         # iterate all sentence nodes to check if they should be connected
